@@ -114,9 +114,13 @@ class Trainer:
     def train(self, data: DataFrame):
         # 训练集
         train = data[data['is_default'].notna()]
-        print(train.head)
         # 测试集
         test = data[data['is_default'].isna()]
+
+        feature_names = list(filter(lambda x: x not in ['is_default', 'loan_id'], train.columns))
+
+        prediction = test[['loan_id']].copy()
+        prediction["isDefault"] = 0
 
         model = lgb.LGBMClassifier(objective='binary',
                                    boosting_type='gbdt',
@@ -126,14 +130,33 @@ class Trainer:
                                    learning_rate=0.1,
                                    n_estimators=10000,
                                    subsample=0.8,
-                                   feature_fraction=0.6,
+                                   colsample_bytree=0.6,
                                    reg_alpha=0.5,
                                    reg_lambda=0.5,
                                    random_state=2021,
                                    is_unbalance=True,
                                    metric='auc')
+        kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=2021)
+        for fold_id, (trn_idx, val_idx) in enumerate(kfold.split(train[feature_names], train['is_default'])):
+            X_train = train.iloc[trn_idx][feature_names]
+            Y_train = train.iloc[trn_idx]['is_default']
 
-        pass
+            X_val = train.iloc[val_idx][feature_names]
+            Y_val = train.iloc[val_idx]['is_default']
+
+            lgb_model = model.fit(X_train,
+                                  Y_train,
+                                  eval_names=['train', 'valid'],
+                                  eval_set=[(X_train, Y_train), (X_val, Y_val)],
+                                  verbose=500,
+                                  eval_metric='auc',
+                                  early_stopping_rounds=50)
+
+            pred_test = lgb_model.predict_proba(test[feature_names], num_iteration=lgb_model.best_iteration_)
+            prediction["isDefault"] += pred_test[:, 1] / kfold.n_splits
+
+        prediction.columns = ['id', 'isDefault']
+        prediction.to_csv("submit.csv", index=False)
 
 
 def main():
