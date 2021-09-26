@@ -3,4 +3,5 @@
 .direnv
 __pycache__
 data/*.csv
+data/*.feather
 .vscode
